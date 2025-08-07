@@ -24,7 +24,6 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from flash_attn.layers.rotary import apply_rotary_emb
 from megatron.core import ModelParallelConfig, tensor_parallel
 from megatron.core import parallel_state as mpu
 from torch import nn
@@ -368,6 +367,7 @@ def apply_rotary_pos_emb_rmpad(q, k, cos, sin, position_ids, indices, sequence_l
 # use flash-attn rotary embeddings with rmpad
 # cos/sin shoudl be: (seq_length, rotary_dim / 2)
 def apply_rotary_pos_emb_rmpad_flash(q, k, cos, sin, cu_seqlens, max_seqlen):
+    from flash_attn.layers.rotary import apply_rotary_emb
     q_embed = apply_rotary_emb(
         q, cos, sin, interleaved=False, inplace=False, cu_seqlens=cu_seqlens, max_seqlen=max_seqlen
     )

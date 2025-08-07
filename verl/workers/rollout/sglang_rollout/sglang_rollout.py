@@ -314,6 +314,14 @@ class SGLangRollout(BaseRollout):
                 raise ValueError(f"Cannot get pad_token_id from processing_class {self.processing_class}") from e
 
     def _init_distributed_env(self, device_mesh_cpu, **kwargs):
+        from verl.utils.device import is_cuda_available, is_npu_available
+        if is_cuda_available:
+            device_visible_key = "CUDA_VISIBLE_DEVICES"
+        elif is_npu_available:
+            device_visible_key = "ASCEND_RT_VISIBLE_DEVICES"
+        else:
+            raise ValueError("Unsupported devices")
+
         self._device_mesh_cpu = device_mesh_cpu
         os.environ.setdefault("SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK", "true")
         self.tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
@@ -353,10 +361,10 @@ class SGLangRollout(BaseRollout):
         visible_devices = [None] * self._device_mesh_cpu.size(1)
 
         torch.distributed.all_gather_object(
-            visible_devices, os.environ["CUDA_VISIBLE_DEVICES"], self._device_mesh_cpu.get_group("tp")
+            visible_devices, os.environ[device_visible_key], self._device_mesh_cpu.get_group("tp")
         )
         self.visible_devices_set = set(",".join(visible_devices).split(","))
-        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(sorted(list(self.visible_devices_set)))
+        os.environ[device_visible_key] = ",".join(sorted(list(self.visible_devices_set)))
 
     def _verify_config(self, model_hf_config):
         if not self.config.get("max_model_len", None):
@@ -425,6 +433,14 @@ class SGLangRollout(BaseRollout):
         first_rank_in_node = self._tp_rank % tp_size_per_node == 0
         engine_kwargs = self.config.get("engine_kwargs", {}).get("sglang", {})
         attention_backend = engine_kwargs.get("attention_backend", None)
+        from verl.utils.device import is_npu_available
+        if is_npu_available:
+            attention_backend = "ascend"
+            add_kwargs = {'device' : 'npu'}
+            enable_memory_saver=False
+        else:
+            add_kwargs = {}
+            enable_memory_saver=True
 
         if first_rank_in_node:
             rank = dist.get_rank()
@@ -433,7 +449,7 @@ class SGLangRollout(BaseRollout):
                 model_path=actor_module,
                 dtype=self.config.dtype,
                 mem_fraction_static=self.config.gpu_memory_utilization,
-                enable_memory_saver=True,
+                enable_memory_saver=enable_memory_saver,
                 base_gpu_id=0,
                 gpu_id_step=1,
                 tp_size=self._tp_size,
@@ -456,6 +472,7 @@ class SGLangRollout(BaseRollout):
                 attention_backend=attention_backend if attention_backend is not None else "fa3",
                 # In async mode, we want token in token out.
                 skip_tokenizer_init=self.config.mode == "async",
+                **add_kwargs,
             )
         else:
             self._engine = None

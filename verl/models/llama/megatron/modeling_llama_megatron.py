@@ -217,7 +217,11 @@ class ParallelLlamaForCausalLM(nn.Module):
         )
 
 
-from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
+from verl.utils.device import is_cuda_available, is_npu_available
+if is_cuda_available:
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
+elif is_npu_available:
+    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, unpad_input
 
 
 class ParallelLlamaModelRmPad(nn.Module):
